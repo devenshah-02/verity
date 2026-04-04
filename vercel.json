@@ -1,0 +1,17 @@
+{
+  "framework": "nextjs",
+  "buildCommand": "npm run build",
+  "devCommand": "npm run dev",
+  "installCommand": "npm install",
+  "functions": {
+    "pages/api/resolve.js": {
+      "maxDuration": 30
+    },
+    "pages/api/analyze.js": {
+      "maxDuration": 30
+    },
+    "pages/api/recommendations.js": {
+      "maxDuration": 30
+    }
+  }
+}
