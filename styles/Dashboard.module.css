@@ -459,21 +459,7 @@
   color: var(--red);
 }
 
-/* Highlight styles - injected via dangerouslySetInnerHTML */
-:global(.brand-hl) {
-  background: rgba(200,181,96,0.2);
-  color: #e8d580;
-  border-radius: 2px;
-  padding: 0 2px;
-  font-weight: 500;
-}
-
-:global(.comp-hl) {
-  background: rgba(248,113,113,0.12);
-  color: #f87171;
-  border-radius: 2px;
-  padding: 0 2px;
-}
+/* Highlight styles live in globals.css */
 
 /* RECOMMENDATIONS */
 .recoSection {
