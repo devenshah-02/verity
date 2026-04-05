@@ -3,10 +3,21 @@ import Head from 'next/head';
 import styles from '../styles/Dashboard.module.css';
 import { extractMentionData } from '../lib/scoring';
 
-const IMPACT_COLOR = { high: { bg: '#f0fdf4', border: '#bbf7d0', text: '#15803d' }, medium: { bg: '#fffbeb', border: '#fde68a', text: '#b45309' }, low: { bg: '#f9fafb', border: '#e5e7eb', text: '#6b7280' } };
+const FUNNEL_META = {
+  discovery:  { label: 'Discovery',  color: '#2563eb', bg: '#eff6ff', bd: '#bfdbfe', lightText: '#1d4ed8' },
+  comparison: { label: 'Comparison', color: '#7c3aed', bg: '#f5f3ff', bd: '#ddd6fe', lightText: '#6d28d9' },
+  decision:   { label: 'Decision',   color: '#059669', bg: '#f0fdf4', bd: '#bbf7d0', lightText: '#047857' },
+};
+
+const IMPACT_COLOR = {
+  high:   { bg: '#f0fdf4', border: '#bbf7d0', text: '#15803d' },
+  medium: { bg: '#fffbeb', border: '#fde68a', text: '#b45309' },
+  low:    { bg: '#f9fafb', border: '#e5e7eb', text: '#6b7280' },
+};
+
 const CAT_LABEL = { content: 'Content', pr: 'PR & Comms', seo: 'SEO', product: 'Product' };
 
-function ScoreRing({ score, size = 100 }) {
+function ScoreRing({ score, size = 96 }) {
   const r = (size / 2) - 8;
   const circ = 2 * Math.PI * r;
   const fill = (score / 100) * circ;
@@ -15,36 +26,53 @@ function ScoreRing({ score, size = 100 }) {
     <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
       <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="#f0f0ec" strokeWidth="7"/>
       <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth="7"
-        strokeLinecap="round"
-        strokeDasharray={`${fill} ${circ}`}
+        strokeLinecap="round" strokeDasharray={`${fill} ${circ}`}
         transform={`rotate(-90 ${size/2} ${size/2})`}/>
-      <text x={size/2} y={size/2 - 4} textAnchor="middle" fontSize="22" fontWeight="600" fill={color} fontFamily="Instrument Serif, serif">{score}</text>
-      <text x={size/2} y={size/2 + 14} textAnchor="middle" fontSize="11" fill="#a8a89e" fontFamily="Inter, sans-serif">/100</text>
+      <text x={size/2} y={size/2 - 4} textAnchor="middle" fontSize="21" fontWeight="600"
+        fill={color} fontFamily="Instrument Serif,serif">{score}</text>
+      <text x={size/2} y={size/2 + 14} textAnchor="middle" fontSize="11"
+        fill="#a8a89e" fontFamily="Inter,sans-serif">/100</text>
     </svg>
   );
 }
 
-export default function Dashboard({ brand, category, competitors, allResults, verityScore, competitorScores, recommendations, personas, onReset }) {
+export default function Dashboard({
+  brand, category, country, competitors, allResults,
+  verityScore, competitorScores, funnelBreakdown, generatedPrompts,
+  recommendations, personas, onReset,
+}) {
   const [activePersona, setActivePersona] = useState(personas[0]?.id);
+  const [activeStage, setActiveStage] = useState('all');
+
   const score = verityScore?.total || 0;
   const scoreColor = score >= 60 ? '#16a34a' : score >= 30 ? '#d97706' : '#dc2626';
-  const scoreBg = score >= 60 ? '#f0fdf4' : score >= 30 ? '#fffbeb' : '#fef2f2';
-  const scoreBd = score >= 60 ? '#bbf7d0' : score >= 30 ? '#fde68a' : '#fecaca';
 
-  const allCompetitors = competitors.map(c => ({ name: c, score: competitorScores[c] || 0 }))
+  const allCompetitors = competitors
+    .map(c => ({ name: c, score: competitorScores[c] || 0 }))
     .sort((a, b) => b.score - a.score);
 
   const totalPrompts = verityScore?.totalPrompts || 0;
   const mentionedCount = verityScore?.mentionedCount || 0;
   const missedCount = totalPrompts - mentionedCount;
-  const topCompWinner = allCompetitors[0];
+  const topComp = allCompetitors[0];
+
+  // Worst funnel stage
+  const worstStage = funnelBreakdown.reduce((worst, s) => {
+    if (s.total === 0) return worst;
+    if (!worst || s.rate < worst.rate) return s;
+    return worst;
+  }, null);
 
   const activeResults = allResults[activePersona] || {};
 
-  // Compute per-persona mention counts for tabs
+  // Filter by funnel stage if selected
+  const filteredResults = activeStage === 'all'
+    ? Object.entries(activeResults)
+    : Object.entries(activeResults).filter(([, r]) => r.stage === activeStage);
+
   function personaMentions(pid) {
-    const r = allResults[pid] || {};
-    return Object.values(r).filter(res => extractMentionData(res.response || '', brand, competitors).mentioned).length;
+    return Object.values(allResults[pid] || {})
+      .filter(r => extractMentionData(r.response || '', brand, competitors).mentioned).length;
   }
 
   function highlightText(text) {
@@ -74,54 +102,103 @@ export default function Dashboard({ brand, category, competitors, allResults, ve
             <span className={styles.navBrand}>{brand}</span>
             <span className={styles.navSep}>·</span>
             <span className={styles.navCat}>{category}</span>
+            <span className={styles.navSep}>·</span>
+            <span className={styles.navCat}>{country}</span>
           </div>
           <button className={styles.newScan} onClick={onReset}>+ New scan</button>
         </nav>
 
         <div className={styles.content}>
 
-          {/* ── SUMMARY HEADER ── */}
+          {/* ── SCORE HEADER ── */}
           <div className={styles.summary}>
             <div className={styles.summaryLeft}>
-              <div className={styles.summaryScoreWrap}>
-                <ScoreRing score={score} size={96} />
-              </div>
+              <ScoreRing score={score} />
               <div className={styles.summaryText}>
-                <p className={styles.summaryEyebrow}>Verity Score</p>
-                <h1 className={`${styles.summaryHeadline} serif`}>{verityScore?.label || 'Analyzing...'}</h1>
+                <p className={styles.summaryEyebrow}>Verity Score · {country}</p>
+                <h1 className={`${styles.summaryHeadline} serif`}>{verityScore?.label || '—'}</h1>
                 <p className={styles.summarySub}>
-                  {brand} appeared in <strong>{mentionedCount} of {totalPrompts}</strong> AI prompts scanned across {personas.length} models.
-                  {missedCount > 0 && topCompWinner && ` In the ${missedCount} prompt${missedCount > 1 ? 's' : ''} you missed, ${topCompWinner.name} was recommended instead.`}
+                  <strong>{brand}</strong> appeared in <strong>{mentionedCount} of {totalPrompts}</strong> real consumer prompts scanned across {personas.length} AI models.
+                  {missedCount > 0 && topComp && (
+                    <> In the <strong>{missedCount}</strong> you missed, <strong>{topComp.name}</strong> was recommended instead.</>
+                  )}
                 </p>
               </div>
             </div>
             <div className={styles.summaryStats}>
-              {[
-                { label: 'Mention rate', value: `${totalPrompts > 0 ? Math.round((mentionedCount / totalPrompts) * 100) : 0}%`, sub: `${mentionedCount}/${totalPrompts} prompts` },
-                { label: 'Score vs best competitor', value: topCompWinner ? `${score} vs ${topCompWinner.score}` : '—', sub: topCompWinner ? (score > topCompWinner.score ? '↑ You lead' : score === topCompWinner.score ? 'Tied' : `↓ ${topCompWinner.name} leads`) : 'No competitors' },
-              ].map(s => (
-                <div key={s.label} className={styles.statCard}>
-                  <p className={styles.statLabel}>{s.label}</p>
-                  <p className={styles.statVal}>{s.value}</p>
-                  <p className={styles.statSub}>{s.sub}</p>
-                </div>
-              ))}
+              <div className={styles.statCard}>
+                <p className={styles.statLabel}>Mention rate</p>
+                <p className={styles.statVal}>{totalPrompts > 0 ? Math.round((mentionedCount / totalPrompts) * 100) : 0}%</p>
+                <p className={styles.statSub}>{mentionedCount}/{totalPrompts} prompts</p>
+              </div>
+              <div className={styles.statCard}>
+                <p className={styles.statLabel}>Weakest stage</p>
+                <p className={styles.statVal} style={{ color: worstStage ? FUNNEL_META[worstStage.id]?.color : 'inherit' }}>
+                  {worstStage?.label || '—'}
+                </p>
+                <p className={styles.statSub}>{worstStage ? `${worstStage.rate}% visibility` : 'No data'}</p>
+              </div>
+              <div className={styles.statCard}>
+                <p className={styles.statLabel}>vs top competitor</p>
+                <p className={styles.statVal} style={{ color: topComp && topComp.score > score ? '#dc2626' : '#16a34a' }}>
+                  {topComp ? `${score > topComp.score ? '+' : ''}${score - topComp.score}` : '—'}
+                </p>
+                <p className={styles.statSub}>{topComp ? (score > topComp.score ? `You lead ${topComp.name}` : score === topComp.score ? `Tied with ${topComp.name}` : `${topComp.name} leads`) : 'No competitors'}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* ── FUNNEL BREAKDOWN — hero section ── */}
+          <div className={styles.funnelSection}>
+            <div className={styles.funnelSectionHeader}>
+              <h2 className={styles.sectionTitle}>Buyer journey visibility</h2>
+              <p className={styles.sectionSub}>Where in the purchase funnel does {brand} appear — and where do you go dark?</p>
+            </div>
+            <div className={styles.funnelGrid}>
+              {funnelBreakdown.map(stage => {
+                const meta = FUNNEL_META[stage.id];
+                if (!meta) return null;
+                const width = stage.total > 0 ? (stage.mentioned / stage.total) * 100 : 0;
+                const verdict = stage.rate >= 60 ? 'Strong' : stage.rate >= 30 ? 'Weak' : stage.rate === 0 ? 'Invisible' : 'Rarely visible';
+                const verdictColor = stage.rate >= 60 ? '#16a34a' : stage.rate >= 30 ? '#d97706' : '#dc2626';
+                return (
+                  <div key={stage.id} className={styles.funnelCard} style={{ borderColor: meta.bd }}>
+                    <div className={styles.funnelCardTop}>
+                      <span className={styles.funnelBadge} style={{ background: meta.bg, color: meta.color, borderColor: meta.bd }}>
+                        {meta.label}
+                      </span>
+                      <span className={styles.funnelVerdict} style={{ color: verdictColor }}>{verdict}</span>
+                    </div>
+                    <div className={styles.funnelRate}>
+                      <span className={styles.funnelRateNum} style={{ color: meta.color }}>{stage.rate}%</span>
+                      <span className={styles.funnelRateSub}>visibility · {stage.mentioned}/{stage.total} prompts</span>
+                    </div>
+                    <div className={styles.funnelBar}>
+                      <div className={styles.funnelBarFill} style={{ width: `${width}%`, background: meta.color }} />
+                    </div>
+                    <p className={styles.funnelDesc}>{stage.desc}</p>
+                    {generatedPrompts?.[stage.id]?.slice(0, 2).map((p, i) => (
+                      <p key={i} className={styles.funnelExPrompt}>"{p.prompt}"</p>
+                    ))}
+                  </div>
+                );
+              })}
             </div>
           </div>
 
           <div className={styles.body}>
-            {/* LEFT COLUMN */}
+            {/* LEFT */}
             <div className={styles.left}>
 
-              {/* SCORE BREAKDOWN */}
+              {/* Score breakdown */}
               <div className={styles.card}>
                 <h3 className={styles.cardTitle}>Score breakdown</h3>
                 <div className={styles.breakdowns}>
                   {[
-                    { label: 'Mention rate', val: verityScore?.breakdown?.mention, max: 40, tip: 'How often your brand appears across all prompts' },
-                    { label: 'First position', val: verityScore?.breakdown?.firstPosition, max: 25, tip: 'How often you\'re the top recommendation' },
-                    { label: 'Sentiment', val: verityScore?.breakdown?.sentiment, max: 20, tip: 'Positive vs neutral framing when mentioned' },
-                    { label: 'AI breadth', val: verityScore?.breakdown?.breadth, max: 15, tip: 'Mentioned across multiple AI models' },
+                    { label: 'Mention rate', val: verityScore?.breakdown?.mention, max: 40, tip: 'How often your brand appears' },
+                    { label: 'First position', val: verityScore?.breakdown?.firstPosition, max: 25, tip: 'How often you\'re recommended first' },
+                    { label: 'Sentiment', val: verityScore?.breakdown?.sentiment, max: 20, tip: 'Positive vs neutral framing' },
+                    { label: 'AI breadth', val: verityScore?.breakdown?.breadth, max: 15, tip: 'Mentioned across multiple models' },
                   ].map(b => (
                     <div key={b.label} className={styles.bdRow}>
                       <div className={styles.bdTop}>
@@ -137,12 +214,11 @@ export default function Dashboard({ brand, category, competitors, allResults, ve
                 </div>
               </div>
 
-              {/* COMPETITOR BENCHMARK */}
+              {/* Competitor benchmark */}
               <div className={styles.card}>
                 <h3 className={styles.cardTitle}>Competitor benchmark</h3>
-                <p className={styles.cardSub}>Estimated AI visibility score for each brand based on the same prompts</p>
+                <p className={styles.cardSub}>AI visibility score across the same prompts</p>
                 <div className={styles.benchList}>
-                  {/* Your brand */}
                   <div className={`${styles.benchRow} ${styles.benchRowYou}`}>
                     <div className={styles.benchMeta}>
                       <span className={styles.benchName}>{brand}</span>
@@ -169,18 +245,14 @@ export default function Dashboard({ brand, category, competitors, allResults, ve
               </div>
             </div>
 
-            {/* RIGHT COLUMN */}
+            {/* RIGHT */}
             <div className={styles.right}>
 
-              {/* ACTION PLAN — always at top of right column */}
+              {/* Action plan */}
               {recommendations.length > 0 && (
                 <div className={styles.card}>
-                  <div className={styles.actionHeader}>
-                    <div>
-                      <h3 className={styles.cardTitle}>Your action plan</h3>
-                      <p className={styles.cardSub}>Specific steps to improve your score — ranked by impact</p>
-                    </div>
-                  </div>
+                  <h3 className={styles.cardTitle}>Your action plan</h3>
+                  <p className={styles.cardSub}>Specific steps to improve your AI visibility — ranked by impact</p>
                   <div className={styles.actionList}>
                     {recommendations.map((r, i) => {
                       const ic = IMPACT_COLOR[r.impact] || IMPACT_COLOR.low;
@@ -204,28 +276,34 @@ export default function Dashboard({ brand, category, competitors, allResults, ve
                 </div>
               )}
 
-              {/* AI RESPONSES */}
+              {/* AI responses */}
               <div className={styles.card}>
                 <h3 className={styles.cardTitle}>AI responses</h3>
                 <p className={styles.cardSub}>
                   <span className={styles.legendDot} style={{ background: '#fef9c3', border: '1px solid #fde68a' }} />
-                  <span style={{ color: '#713f12' }}>Yellow = your brand</span>
-                  <span style={{ margin: '0 6px', color: '#d1d5db' }}>·</span>
+                  <span style={{ color: '#713f12', fontSize: 12 }}>Your brand</span>
+                  <span style={{ margin: '0 8px', color: '#d1d5db' }}>·</span>
                   <span className={styles.legendDot} style={{ background: '#fee2e2', border: '1px solid #fecaca' }} />
-                  <span style={{ color: '#991b1b' }}>Red = competitor</span>
+                  <span style={{ color: '#991b1b', fontSize: 12 }}>Competitor</span>
                 </p>
+
+                {/* Persona tabs */}
                 <div className={styles.personaTabs}>
                   {personas.map(p => {
                     const m = personaMentions(p.id);
                     const t = Object.values(allResults[p.id] || {}).length;
-                    const isActive = activePersona === p.id;
                     return (
                       <button key={p.id}
-                        className={`${styles.personaTab} ${isActive ? styles.personaTabActive : ''}`}
+                        className={`${styles.personaTab} ${activePersona === p.id ? styles.personaTabActive : ''}`}
                         onClick={() => setActivePersona(p.id)}>
                         <span className={styles.personaDot} style={{ background: p.color }} />
                         <span className={styles.personaLabel}>{p.label}</span>
-                        <span className={styles.personaStat} style={{ background: m > 0 ? '#f0fdf4' : '#f9fafb', color: m > 0 ? '#16a34a' : '#9ca3af' }}>
+                        {p.isLive
+                          ? <span className={styles.liveBadge}>Live</span>
+                          : <span className={styles.simBadge}>Simulated</span>
+                        }
+                        <span className={styles.personaStat}
+                          style={{ background: m > 0 ? '#f0fdf4' : '#f9fafb', color: m > 0 ? '#16a34a' : '#9ca3af' }}>
                           {m}/{t}
                         </span>
                       </button>
@@ -233,16 +311,30 @@ export default function Dashboard({ brand, category, competitors, allResults, ve
                   })}
                 </div>
 
-                <div className={styles.responseList}>
-                  {Object.entries(activeResults).map(([catId, result]) => {
-                    const a = extractMentionData(result.response || '', brand, competitors);
+                {/* Funnel stage filter */}
+                <div className={styles.stageFilter}>
+                  {['all', 'discovery', 'comparison', 'decision'].map(s => {
+                    const meta = s === 'all' ? null : FUNNEL_META[s];
                     return (
-                      <ResponseCard key={catId} result={result} analysis={a}
-                        brand={brand} competitors={competitors} highlightText={highlightText} />
+                      <button key={s}
+                        className={`${styles.stageFilterBtn} ${activeStage === s ? styles.stageFilterActive : ''}`}
+                        style={activeStage === s && meta ? { background: meta.bg, color: meta.color, borderColor: meta.bd } : {}}
+                        onClick={() => setActiveStage(s)}>
+                        {s === 'all' ? 'All stages' : meta?.label}
+                      </button>
                     );
                   })}
-                  {Object.keys(activeResults).length === 0 && (
-                    <p className={styles.emptyState}>No responses for this model.</p>
+                </div>
+
+                <div className={styles.responseList}>
+                  {filteredResults.map(([key, result]) => {
+                    const a = extractMentionData(result.response || '', brand, competitors);
+                    return (
+                      <ResponseCard key={key} result={result} analysis={a} highlightText={highlightText} />
+                    );
+                  })}
+                  {filteredResults.length === 0 && (
+                    <p className={styles.emptyState}>No responses for this filter.</p>
                   )}
                 </div>
               </div>
@@ -256,36 +348,33 @@ export default function Dashboard({ brand, category, competitors, allResults, ve
 
 function ResponseCard({ result, analysis, highlightText }) {
   const [expanded, setExpanded] = useState(false);
+  const meta = result.stage ? FUNNEL_META[result.stage] : null;
 
   const STATUS = analysis.mentioned
     ? { label: 'Mentioned', bg: '#f0fdf4', bd: '#bbf7d0', color: '#15803d', icon: '✓' }
     : { label: 'Not mentioned', bg: '#fef2f2', bd: '#fecaca', color: '#dc2626', icon: '—' };
 
-  const promptCatColors = {
-    Discovery: { bg: '#eff6ff', color: '#1d4ed8' },
-    'Direct brand': { bg: '#fffbeb', color: '#b45309' },
-    Competitive: { bg: '#f5f3ff', color: '#6d28d9' },
-    'High intent': { bg: '#f0fdf4', color: '#15803d' },
-  };
-  const catStyle = promptCatColors[result.promptLabel] || { bg: '#f9fafb', color: '#6b7280' };
-
   return (
-    <div className={styles.responseCard} style={{ borderLeft: `3px solid ${analysis.mentioned ? '#16a34a' : '#dc2626'}20` }}>
+    <div className={styles.responseCard} style={{ borderLeft: `3px solid ${analysis.mentioned ? '#16a34a' : '#dc2626'}22` }}>
       <div className={styles.rcHeader}>
         <div className={styles.rcMeta}>
-          <span className={styles.rcCat} style={{ background: catStyle.bg, color: catStyle.color }}>
-            {result.promptLabel}
-          </span>
+          {meta && (
+            <span className={styles.rcStage} style={{ background: meta.bg, color: meta.color, borderColor: meta.bd }}>
+              {meta.label}
+            </span>
+          )}
           <span className={styles.rcStatus} style={{ background: STATUS.bg, borderColor: STATUS.bd, color: STATUS.color }}>
             {STATUS.icon} {STATUS.label}
           </span>
         </div>
         {analysis.mentioned && analysis.competitorsMentioned.length > 0 && (
-          <span className={styles.rcCompNote}>+{analysis.competitorsMentioned.length} competitor{analysis.competitorsMentioned.length > 1 ? 's' : ''} also mentioned</span>
+          <span className={styles.rcCompNote}>+{analysis.competitorsMentioned.length} competitor also here</span>
         )}
       </div>
 
       <p className={styles.rcPrompt}>"{result.prompt}"</p>
+
+      {result.intent && <p className={styles.rcIntent}>{result.intent}</p>}
 
       <div className={`${styles.rcResponse} ${expanded ? styles.rcExpanded : ''}`}
         dangerouslySetInnerHTML={{ __html: highlightText(result.response) }} />
