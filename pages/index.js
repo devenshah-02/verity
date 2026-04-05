@@ -5,10 +5,10 @@ import Dashboard from '../components/Dashboard';
 import { PROMPT_CATEGORIES, AI_PERSONAS, buildPrompt } from '../lib/prompts';
 import { extractMentionData, computeVerityScore, computeCompetitorScore } from '../lib/scoring';
 
-const STEPS = { INPUT: 'input', CONFIRM: 'confirm', SCANNING: 'scanning', RESULTS: 'results' };
+const STEPS = { LANDING: 'landing', INPUT: 'input', CONFIRM: 'confirm', SCANNING: 'scanning', RESULTS: 'results' };
 
 export default function Home() {
-  const [step, setStep] = useState(STEPS.INPUT);
+  const [step, setStep] = useState(STEPS.LANDING);
   const [rawInput, setRawInput] = useState('');
   const [resolving, setResolving] = useState(false);
   const [resolveError, setResolveError] = useState('');
@@ -16,15 +16,13 @@ export default function Home() {
   const [category, setCategory] = useState('');
   const [competitors, setCompetitors] = useState([]);
   const [competitorInput, setCompetitorInput] = useState('');
-  const [selectedPersonas, setSelectedPersonas] = useState(['chatgpt', 'gemini', 'claude', 'perplexity']);
-  const [selectedCategories, setSelectedCategories] = useState(['discovery', 'direct', 'competitive', 'intent']);
-  const [scanLog, setScanLog] = useState([]);
+  const [selectedPersonas] = useState(['chatgpt', 'gemini', 'claude', 'perplexity']);
   const [scanProgress, setScanProgress] = useState(0);
+  const [scanStatus, setScanStatus] = useState('');
   const [allResults, setAllResults] = useState({});
   const [verityScore, setVerityScore] = useState(null);
   const [competitorScores, setCompetitorScores] = useState({});
   const [recommendations, setRecommendations] = useState([]);
-  const inputRef = useRef();
 
   async function handleResolve() {
     if (!rawInput.trim()) return;
@@ -52,88 +50,73 @@ export default function Home() {
   function addCompetitor() {
     const val = competitorInput.trim();
     if (val && !competitors.includes(val)) {
-      setCompetitors([...competitors, val]);
+      setCompetitors(prev => [...prev, val]);
       setCompetitorInput('');
     }
   }
 
   function removeCompetitor(c) {
-    setCompetitors(competitors.filter(x => x !== c));
-  }
-
-  function togglePersona(id) {
-    setSelectedPersonas(prev =>
-      prev.includes(id) ? (prev.length > 1 ? prev.filter(x => x !== id) : prev) : [...prev, id]
-    );
-  }
-
-  function toggleCategory(id) {
-    setSelectedCategories(prev =>
-      prev.includes(id) ? (prev.length > 1 ? prev.filter(x => x !== id) : prev) : [...prev, id]
-    );
+    setCompetitors(prev => prev.filter(x => x !== c));
   }
 
   async function startScan() {
     setStep(STEPS.SCANNING);
-    setScanLog([]);
     setScanProgress(0);
-    setAllResults({});
+    setScanStatus('Building prompts...');
 
     const activePersonas = AI_PERSONAS.filter(p => selectedPersonas.includes(p.id));
-    const activeCategories = PROMPT_CATEGORIES.filter(c => selectedCategories.includes(c.id));
     const results = {};
-    const logs = [];
 
-    // Build all tasks
-    const tasks = [];
+    // Build all tasks upfront
+    const allTasks = [];
     activePersonas.forEach(persona => {
-      activeCategories.forEach(cat => {
-        // Pick first prompt from each category (MVP: 1 prompt per category per model)
-        const template = cat.prompts[0];
+      PROMPT_CATEGORIES.forEach(cat => {
         const competitor = competitors[0] || 'a major competitor';
-        const prompt = buildPrompt(template, { brand, category, competitor });
-        tasks.push({ persona, cat, prompt });
+        const prompt = buildPrompt(cat.prompts[0], { brand, category, competitor });
+        allTasks.push({
+          personaId: persona.id,
+          promptId: cat.id,
+          promptLabel: cat.label,
+          prompt,
+          categoryColor: cat.color,
+        });
       });
     });
 
-    const total = tasks.length;
-    let done = 0;
+    // Fire ALL tasks in parallel via single API call
+    setScanStatus(`Querying ${activePersonas.length} AI models simultaneously...`);
+    setScanProgress(20);
 
-    for (const task of tasks) {
-      const logEntry = { id: `${task.persona.id}-${task.cat.id}`, persona: task.persona.label, category: task.cat.label, status: 'running' };
-      logs.push(logEntry);
-      setScanLog([...logs]);
+    try {
+      const res = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tasks: allTasks }),
+      });
+      const data = await res.json();
 
-      try {
-        const res = await fetch('/api/analyze', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ personaId: task.persona.id, prompt: task.prompt }),
-        });
-        const data = await res.json();
-        if (!results[task.persona.id]) results[task.persona.id] = {};
-        results[task.persona.id][task.cat.id] = {
-          response: data.response || '',
-          promptLabel: task.cat.label,
-          prompt: task.prompt,
-          category: task.cat.id,
-          categoryColor: task.cat.color,
+      setScanProgress(70);
+      setScanStatus('Analyzing responses...');
+
+      // Restructure into { personaId: { promptId: result } }
+      (data.results || []).forEach(r => {
+        if (!results[r.personaId]) results[r.personaId] = {};
+        results[r.personaId][r.promptId] = {
+          response: r.response || '',
+          promptLabel: r.promptLabel,
+          prompt: r.prompt,
+          category: r.promptId,
+          categoryColor: r.categoryColor,
         };
-        logEntry.status = 'done';
-        const analysis = extractMentionData(data.response || '', brand, competitors);
-        logEntry.mentioned = analysis.mentioned;
-      } catch (e) {
-        logEntry.status = 'error';
-      }
-
-      done++;
-      setScanProgress(Math.round((done / total) * 100));
-      setScanLog([...logs]);
+      });
+    } catch (e) {
+      console.error('Scan failed', e);
     }
 
     setAllResults(results);
+    setScanProgress(85);
+    setScanStatus('Computing your Verity Score...');
 
-    // Compute scores
     const score = computeVerityScore(results, brand, competitors);
     setVerityScore(score);
 
@@ -143,7 +126,9 @@ export default function Home() {
     });
     setCompetitorScores(compScores);
 
-    // Fetch recommendations
+    setScanProgress(92);
+    setScanStatus('Generating your action plan...');
+
     try {
       const recRes = await fetch('/api/recommendations', {
         method: 'POST',
@@ -162,11 +147,14 @@ export default function Home() {
       setRecommendations([]);
     }
 
+    setScanProgress(100);
+    setScanStatus('Done!');
+    await new Promise(r => setTimeout(r, 400));
     setStep(STEPS.RESULTS);
   }
 
   function reset() {
-    setStep(STEPS.INPUT);
+    setStep(STEPS.LANDING);
     setRawInput('');
     setBrand('');
     setCategory('');
@@ -175,7 +163,6 @@ export default function Home() {
     setVerityScore(null);
     setCompetitorScores({});
     setRecommendations([]);
-    setScanLog([]);
     setScanProgress(0);
   }
 
@@ -199,106 +186,177 @@ export default function Home() {
     <>
       <Head>
         <title>Verity — AI Brand Visibility</title>
-        <meta name="description" content="See how AI recommends your brand. Measure, benchmark, and improve your presence across ChatGPT, Gemini, Claude, and Perplexity." />
+        <meta name="description" content="Find out if AI recommends your brand — or your competitor." />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <link rel="icon" href="/favicon.ico" />
       </Head>
 
       <div className={styles.page}>
-        {/* Nav */}
         <nav className={styles.nav}>
-          <div className={styles.logo}>
+          <div className={styles.logo} onClick={() => setStep(STEPS.LANDING)} style={{ cursor: 'pointer' }}>
             <span className={`${styles.logoMark} serif`}>V</span>
             <span className={styles.logoText}>Verity</span>
           </div>
-          <span className={styles.navTag}>Beta</span>
+          {step !== STEPS.LANDING && (
+            <button className={styles.backBtn} onClick={() => setStep(STEPS.LANDING)}>← Back</button>
+          )}
+          {step === STEPS.LANDING && (
+            <button className={styles.navCta} onClick={() => setStep(STEPS.INPUT)}>
+              Check your brand →
+            </button>
+          )}
         </nav>
 
-        {step === STEPS.INPUT && (
-          <div className={styles.hero}>
-            <div className={styles.heroInner}>
-              <div className={styles.pill}>AI visibility intelligence</div>
-              <h1 className={`${styles.headline} serif`}>
+        {/* ── LANDING ── */}
+        {step === STEPS.LANDING && (
+          <div className={styles.landing}>
+            <div className={styles.landingHero}>
+              <div className={styles.heroBadge}>Free AI visibility scan</div>
+              <h1 className={`${styles.heroHeadline} serif`}>
                 What does AI say<br />about your brand?
               </h1>
-              <p className={styles.subline}>
-                Enter your website URL or brand name. Verity scans ChatGPT, Gemini, Claude, and Perplexity to measure your AI presence — and shows you who's winning instead.
+              <p className={styles.heroSub}>
+                When someone asks ChatGPT, Gemini, or Perplexity for a recommendation in your category — does your brand show up? Verity tells you exactly where you stand, who's winning instead, and what to do about it.
               </p>
-
-              <div className={styles.inputWrap}>
-                <div className={styles.inputRow}>
-                  <div className={styles.inputIcon}>
-                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                      <circle cx="8" cy="8" r="6.5" stroke="currentColor" strokeOpacity="0.4"/>
-                      <path d="M5.5 8c0-1.38.57-2.63 1.5-3.5M10.5 8c0 1.38-.57 2.63-1.5 3.5M3 8h10M5.5 5h5M5.5 11h5" stroke="currentColor" strokeOpacity="0.4" strokeLinecap="round"/>
-                    </svg>
-                  </div>
-                  <input
-                    ref={inputRef}
-                    className={styles.mainInput}
-                    type="text"
-                    placeholder="myntra.com or Myntra or Fashion e-commerce brand"
-                    value={rawInput}
-                    onChange={e => setRawInput(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && handleResolve()}
-                    autoFocus
-                  />
-                  <button
-                    className={styles.analyzeBtn}
-                    onClick={handleResolve}
-                    disabled={resolving || !rawInput.trim()}
-                  >
-                    {resolving ? (
-                      <span className={styles.btnSpinner} />
-                    ) : (
-                      <>Analyze →</>
-                    )}
-                  </button>
-                </div>
-                {resolveError && <p className={styles.inputError}>{resolveError}</p>}
-                <div className={styles.inputHints}>
-                  <span>Try:</span>
-                  {['myntra.com', 'Nykaa', 'boAt', 'Lenskart'].map(ex => (
-                    <button key={ex} className={styles.exampleChip} onClick={() => { setRawInput(ex); }}>
-                      {ex}
-                    </button>
-                  ))}
-                </div>
+              <div className={styles.heroActions}>
+                <button className={styles.heroCta} onClick={() => setStep(STEPS.INPUT)}>
+                  Scan my brand — it's free →
+                </button>
+                <span className={styles.heroNote}>Takes ~20 seconds. No sign-up needed.</span>
               </div>
+              <div className={styles.modelRow}>
+                {[
+                  { label: 'ChatGPT', color: '#10a37f' },
+                  { label: 'Gemini', color: '#4285F4' },
+                  { label: 'Claude', color: '#D97757' },
+                  { label: 'Perplexity', color: '#20b2aa' },
+                ].map(m => (
+                  <span key={m.label} className={styles.modelPill}>
+                    <span className={styles.modelDot} style={{ background: m.color }} />
+                    {m.label}
+                  </span>
+                ))}
+              </div>
+            </div>
 
-              <div className={styles.modelBadges}>
-                {['ChatGPT', 'Gemini', 'Claude', 'Perplexity'].map((m, i) => (
-                  <span key={m} className={styles.modelBadge} style={{ animationDelay: `${i * 0.1}s` }}>{m}</span>
+            <div className={styles.howItWorks}>
+              <p className={styles.sectionEyebrow}>How it works</p>
+              <div className={styles.steps}>
+                {[
+                  { n: '1', title: 'Enter your brand or URL', desc: 'Paste your website or type your brand name. Verity figures out your category and finds your competitors automatically.' },
+                  { n: '2', title: 'We query 4 AI models', desc: 'Verity runs 16 prompts across ChatGPT, Gemini, Claude, and Perplexity — discovery queries, comparisons, and purchase-intent searches.' },
+                  { n: '3', title: 'Get your Verity Score', desc: 'See exactly where you appear, where competitors beat you, and get a specific action plan to improve your AI visibility.' },
+                ].map(s => (
+                  <div key={s.n} className={styles.stepCard}>
+                    <div className={styles.stepNum}>{s.n}</div>
+                    <div>
+                      <h3 className={styles.stepTitle}>{s.title}</h3>
+                      <p className={styles.stepDesc}>{s.desc}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className={styles.whySection}>
+              <p className={styles.sectionEyebrow}>Why this matters</p>
+              <div className={styles.whyGrid}>
+                {[
+                  { stat: '40%', label: 'of product searches now start with an AI assistant, not Google' },
+                  { stat: '0', label: 'tools exist today to measure your brand\'s AI visibility — until now' },
+                  { stat: '3×', label: 'more likely a brand is purchased when recommended first by AI' },
+                ].map(w => (
+                  <div key={w.stat} className={styles.whyCard}>
+                    <div className={`${styles.whyStat} serif`}>{w.stat}</div>
+                    <p className={styles.whyLabel}>{w.label}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className={styles.landingCta}>
+              <h2 className={`${styles.ctaHeadline} serif`}>Your competitors are already being recommended.</h2>
+              <p className={styles.ctaSub}>Find out where you stand in 20 seconds.</p>
+              <button className={styles.heroCta} onClick={() => setStep(STEPS.INPUT)}>
+                Scan my brand — it's free →
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── INPUT ── */}
+        {step === STEPS.INPUT && (
+          <div className={styles.centeredFlow}>
+            <div className={styles.flowCard}>
+              <div className={styles.flowCardHeader}>
+                <h2 className={`${styles.flowTitle} serif`}>Enter your brand</h2>
+                <p className={styles.flowSub}>Paste your website URL or type your brand name</p>
+              </div>
+              <div className={styles.inputGroup}>
+                <input
+                  className={styles.mainInput}
+                  type="text"
+                  placeholder="myntra.com  or  Myntra  or  Online fashion brand India"
+                  value={rawInput}
+                  onChange={e => setRawInput(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && !resolving && rawInput.trim() && handleResolve()}
+                  autoFocus
+                />
+                {resolveError && <p className={styles.inputError}>{resolveError}</p>}
+              </div>
+              <button
+                className={styles.primaryBtn}
+                onClick={handleResolve}
+                disabled={resolving || !rawInput.trim()}
+              >
+                {resolving ? <span className={styles.spinner} /> : null}
+                {resolving ? 'Identifying brand...' : 'Continue →'}
+              </button>
+              <div className={styles.exampleRow}>
+                <span className={styles.exampleLabel}>Try:</span>
+                {['myntra.com', 'boAt', 'Lenskart', 'Nykaa'].map(ex => (
+                  <button key={ex} className={styles.exampleChip}
+                    onClick={() => setRawInput(ex)}>
+                    {ex}
+                  </button>
                 ))}
               </div>
             </div>
           </div>
         )}
 
+        {/* ── CONFIRM ── */}
         {step === STEPS.CONFIRM && (
-          <div className={styles.confirmWrap}>
-            <div className={styles.confirmCard}>
-              <div className={styles.confirmHeader}>
-                <div>
-                  <p className={styles.confirmMeta}>Brand identified</p>
-                  <h2 className={`${styles.confirmBrand} serif`}>{brand}</h2>
-                  <p className={styles.confirmCategory}>{category}</p>
+          <div className={styles.centeredFlow}>
+            <div className={styles.flowCard}>
+              <div className={styles.flowCardHeader}>
+                <div className={styles.confirmBrandRow}>
+                  <div>
+                    <p className={styles.confirmMeta}>We identified your brand as</p>
+                    <h2 className={`${styles.confirmBrand} serif`}>{brand}</h2>
+                    <p className={styles.confirmCategory}>{category}</p>
+                  </div>
+                  <button className={styles.ghostBtn} onClick={() => setStep(STEPS.INPUT)}>
+                    Edit
+                  </button>
                 </div>
-                <button className={styles.editBtn} onClick={() => setStep(STEPS.INPUT)}>← Edit</button>
               </div>
 
-              <div className={styles.section}>
-                <div className={styles.sectionLabel}>Competitors to track</div>
-                <p className={styles.sectionSub}>We found these. Remove any or add your own.</p>
-                <div className={styles.competitorList}>
+              <div className={styles.confirmSection}>
+                <div className={styles.confirmSectionHeader}>
+                  <div>
+                    <p className={styles.confirmSectionTitle}>Competitors to benchmark against</p>
+                    <p className={styles.confirmSectionSub}>We found these automatically. Remove any you don't want, or add others.</p>
+                  </div>
+                </div>
+                <div className={styles.chipList}>
                   {competitors.map(c => (
                     <div key={c} className={styles.competitorChip}>
-                      <span>{c}</span>
-                      <button onClick={() => removeCompetitor(c)} className={styles.removeBtn}>×</button>
+                      {c}
+                      <button className={styles.removeChip} onClick={() => removeCompetitor(c)}>×</button>
                     </div>
                   ))}
                 </div>
-                <div className={styles.addCompRow}>
+                <div className={styles.addRow}>
                   <input
                     className={styles.addInput}
                     type="text"
@@ -311,75 +369,52 @@ export default function Home() {
                 </div>
               </div>
 
-              <div className={styles.section}>
-                <div className={styles.sectionLabel}>AI models to scan</div>
-                <div className={styles.toggleGrid}>
-                  {AI_PERSONAS.map(p => (
-                    <button
-                      key={p.id}
-                      className={`${styles.toggleChip} ${selectedPersonas.includes(p.id) ? styles.toggleOn : ''}`}
-                      onClick={() => togglePersona(p.id)}
-                      style={selectedPersonas.includes(p.id) ? { borderColor: p.color + '60', background: p.color + '14' } : {}}
-                    >
-                      <span className={styles.toggleDot} style={{ background: p.color }} />
-                      {p.label}
-                    </button>
-                  ))}
+              <div className={styles.scanPreview}>
+                <div className={styles.scanPreviewInner}>
+                  <span className={styles.scanPreviewIcon}>⚡</span>
+                  <div>
+                    <p className={styles.scanPreviewTitle}>What we'll scan</p>
+                    <p className={styles.scanPreviewDesc}>16 prompts across ChatGPT, Gemini, Claude & Perplexity — discovery, comparison, and purchase-intent queries — all in parallel. Takes ~20 seconds.</p>
+                  </div>
                 </div>
               </div>
 
-              <div className={styles.section}>
-                <div className={styles.sectionLabel}>Prompt categories</div>
-                <div className={styles.toggleGrid}>
-                  {PROMPT_CATEGORIES.map(c => (
-                    <button
-                      key={c.id}
-                      className={`${styles.toggleChip} ${selectedCategories.includes(c.id) ? styles.toggleOn : ''}`}
-                      onClick={() => toggleCategory(c.id)}
-                      style={selectedCategories.includes(c.id) ? { borderColor: c.color + '60', background: c.color + '14' } : {}}
-                    >
-                      <span className={styles.toggleDot} style={{ background: c.color }} />
-                      <span>
-                        <span className={styles.toggleLabel}>{c.label}</span>
-                        <span className={styles.toggleDesc}>{c.description}</span>
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <button className={styles.startScanBtn} onClick={startScan}>
-                Start AI visibility scan →
+              <button className={styles.primaryBtn} onClick={startScan}>
+                Start scan →
               </button>
             </div>
           </div>
         )}
 
+        {/* ── SCANNING ── */}
         {step === STEPS.SCANNING && (
-          <div className={styles.scanWrap}>
-            <div className={styles.scanCard}>
-              <div className={styles.scanHeader}>
-                <div className={styles.scanPulse} />
-                <h2 className={`${styles.scanTitle} serif`}>Scanning AI models</h2>
-                <p className={styles.scanSub}>Running prompts across {selectedPersonas.length} AI models — this takes about 30–60 seconds</p>
+          <div className={styles.centeredFlow}>
+            <div className={`${styles.flowCard} ${styles.scanCard}`}>
+              <div className={styles.scanAnimation}>
+                <div className={styles.scanRings}>
+                  <div className={styles.ring1} />
+                  <div className={styles.ring2} />
+                  <div className={styles.ring3} />
+                  <div className={styles.scanCore} />
+                </div>
               </div>
-
-              <div className={styles.progressBar}>
+              <h2 className={`${styles.scanTitle} serif`}>Scanning AI models</h2>
+              <p className={styles.scanSub}>{scanStatus}</p>
+              <div className={styles.progressTrack}>
                 <div className={styles.progressFill} style={{ width: `${scanProgress}%` }} />
               </div>
-              <p className={styles.progressLabel}>{scanProgress}% complete</p>
-
-              <div className={styles.logList}>
-                {scanLog.map(log => (
-                  <div key={log.id} className={`${styles.logItem} ${styles[`logItem_${log.status}`]}`}>
-                    <span className={styles.logDot} data-status={log.status} />
-                    <span className={styles.logPersona}>{log.persona}</span>
-                    <span className={styles.logCategory}>{log.category}</span>
-                    {log.status === 'done' && (
-                      <span className={log.mentioned ? styles.logMentioned : styles.logMissed}>
-                        {log.mentioned ? '✓ mentioned' : '— not mentioned'}
-                      </span>
-                    )}
+              <p className={styles.progressPct}>{scanProgress}%</p>
+              <div className={styles.modelStatus}>
+                {[
+                  { label: 'ChatGPT', color: '#10a37f' },
+                  { label: 'Gemini', color: '#4285F4' },
+                  { label: 'Claude', color: '#D97757' },
+                  { label: 'Perplexity', color: '#20b2aa' },
+                ].map(m => (
+                  <div key={m.label} className={styles.modelStatusItem}>
+                    <span className={`${styles.modelStatusDot} ${scanProgress > 20 && scanProgress < 85 ? styles.dotActive : scanProgress >= 85 ? styles.dotDone : ''}`}
+                      style={scanProgress >= 85 ? { background: m.color } : {}} />
+                    {m.label}
                   </div>
                 ))}
               </div>
