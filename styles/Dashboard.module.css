@@ -348,3 +348,159 @@
   .summaryLeft { flex-direction: column; }
   .navMeta { display: none; }
 }
+
+/* ── FUNNEL SECTION ── */
+.funnelSection {
+  padding: 36px 0 28px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 24px;
+}
+
+.funnelSectionHeader { margin-bottom: 20px; }
+
+.sectionTitle {
+  font-size: 18px; font-weight: 600;
+  color: var(--text-1); letter-spacing: -0.02em;
+  margin-bottom: 4px;
+}
+
+.sectionSub { font-size: 14px; color: var(--text-2); }
+
+.funnelGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+}
+
+.funnelCard {
+  background: var(--bg-2);
+  border: 1px solid;
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  box-shadow: var(--shadow-sm);
+}
+
+.funnelCardTop {
+  display: flex; align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.funnelBadge {
+  font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.07em;
+  padding: 3px 9px; border-radius: 20px;
+  border: 1px solid;
+}
+
+.funnelVerdict { font-size: 12px; font-weight: 600; }
+
+.funnelRate {
+  display: flex; align-items: baseline; gap: 6px;
+  margin-bottom: 10px;
+}
+
+.funnelRateNum {
+  font-size: 32px; font-weight: 700;
+  letter-spacing: -0.03em; line-height: 1;
+  font-family: 'Instrument Serif', serif;
+}
+
+.funnelRateSub { font-size: 12px; color: var(--text-2); }
+
+.funnelBar {
+  height: 4px; background: var(--bg-3);
+  border-radius: 2px; overflow: hidden;
+  margin-bottom: 12px;
+}
+
+.funnelBarFill {
+  height: 100%; border-radius: 2px;
+  transition: width 1s ease;
+}
+
+.funnelDesc {
+  font-size: 12px; color: var(--text-2);
+  line-height: 1.5; margin-bottom: 10px;
+}
+
+.funnelExPrompt {
+  font-size: 11px; color: var(--text-3);
+  font-style: italic; line-height: 1.4;
+  padding: 4px 0;
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+}
+
+/* ── STAGE FILTER ── */
+.stageFilter {
+  display: flex; gap: 6px; flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.stageFilterBtn {
+  font-size: 12px; font-weight: 500;
+  padding: 5px 12px; border-radius: 20px;
+  border: 1px solid var(--border);
+  color: var(--text-2); background: var(--bg-3);
+  cursor: pointer; transition: all 0.15s;
+}
+.stageFilterBtn:hover { border-color: var(--border-md); color: var(--text-1); }
+.stageFilterActive { border-width: 1.5px; }
+
+/* Response card intent line */
+.rcIntent {
+  font-size: 11px; color: var(--text-3);
+  margin-bottom: 8px; font-style: italic;
+}
+
+.rcStage {
+  font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.06em;
+  padding: 2px 7px; border-radius: 20px;
+  border: 1px solid;
+}
+
+@media (max-width: 900px) {
+  .funnelGrid { grid-template-columns: 1fr; }
+}
+
+/* ── LIVE / SIMULATED BADGES on persona tabs ── */
+.liveBadge {
+  font-size: 9px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.06em;
+  color: #15803d;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  padding: 2px 6px; border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.simBadge {
+  font-size: 9px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--text-3);
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  padding: 2px 6px; border-radius: 4px;
+  flex-shrink: 0;
+}
+
+/* ── LIVE / SIM BADGES on model tabs ── */
+.liveBadge {
+  font-size: 9px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.06em;
+  color: #15803d; background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  padding: 2px 5px; border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.simBadge {
+  font-size: 9px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.06em;
+  color: #9ca3af; background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  padding: 2px 5px; border-radius: 4px;
+  flex-shrink: 0;
+}
